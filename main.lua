@@ -1,858 +1,1014 @@
--- =========================================================
--- MINI ENGINE 2D MODULAR E ORIENTADA A ENTIDADES EM LÖVE2D
--- =========================================================
+-- main.lua (Refatorado com Níveis e Menus - Versão Corrigida)
 
-local engine = {}
+-- GLOBAIS
+local fundos = {} -- Não mais usada para fundos aleatórios, mas mantida por enquanto para demonstração. Fundo agora é por nível.
+local fundoAtual -- A imagem de fundo atual para o nível
 
--- ===================== CONFIGURAÇÕES GLOBAIS DA ENGINE =====================
-engine.config = {
-    windowWidth = 800,
-    windowHeight = 600,
-    gravityStrength = 1000, -- Força da gravidade (pixels/segundo^2). Defina como 0 para desativar.
-    debugDraw = false,      -- Desenha retângulos de colisão para depuração
-    limitEntitiesToWindow = true, -- Se entidades que não são players devem ficar presas na tela
-    masterVolume = 0.7,     -- Volume global (0.0 a 1.0)
-    musicVolume = 1.0,      -- Volume da música (0.0 a 1.0, relativo ao master)
-    sfxVolume = 1.0         -- Volume dos efeitos sonoros (0.0 a 1.0, relativo ao master)
+local player
+local enemies = {}
+local platforms = {}
+local projectiles = {}    -- Projéteis do jogador
+local bonuses = {}        -- Bônus coletáveis
+local score = 0
+local lives = 3
+local currentLevel = 1
+local gameState = "menu" -- "playing", "gameover", "gamewin" (opcional para o futuro)
+local finalScore = 0      -- Para guardar a pontuação no Game Over
+local displayScore = 0  -- Novo: Pontuação exibida na transição (para animação)
+local targetScore = 0   -- Novo: Pontuação final do contador para a fase
+local scoreCountSpeed = 500 -- Novo: Velocidade de contagem dos pontos (pontos por segundo)
+
+-- Assets (Imagens e Sons)
+local assets = {}
+local sounds = {}
+local music = {}
+
+-- CONSTANTES DO JOGO (Centralizadas para fácil ajuste)
+local CONFIG = {
+    GRAVITY = 300,
+    PLAYER_SPEED = 80,
+    JUMP_VELOCITY = -190,
+    PROJECTILE_SPEED = 200,
+    SHOOT_COOLDOWN = 0.5,
+    INVINCIBLE_TIME = 2, -- Segundos de invencibilidade após ser atingido
+    PLATFORM_TILE_WIDTH = 16,
+    PLATFORM_TILE_HEIGHT = 16,
+    ENEMY_RESPAWN_TIME = 5, -- Tempo em segundos para o inimigo reaparecer
+    BONUS_RESPAWN_TIME = 10, -- Tempo em segundos para o bônus reaparecer
+    CAT_SPAWN_INTERVAL = 3, -- Tempo para o gato reaparecer (inativo -> aviso)
+    CAT_LIFETIME = 2,           -- Tempo que o gato fica visível (ativo -> inativo)
+    CAT_WARNING_TIME = 3,       -- Tempo que o ícone de aviso aparece antes do gato real
+    BASE_GAME_WIDTH = 320, -- Largura lógica interna do jogo (usada para escala e loop horizontal)
+    BASE_GAME_HEIGHT = 240 -- Altura lógica interna do jogo
 }
 
--- Listas de Gerenciamento de Entidades e Assets
-engine.entities = {}
-engine.assets = {} -- Já contém os assets de imagem e áudio
-engine.nextEntityId = 1
-engine.prefabs = {}
+-- Tabela para armazenar os dados de cada nível
+local levels = {
+    [1] = {
+        background = "assets/imagens/fundo_cidade.png", -- Caminho do asset do fundo
+        music = "assets/sounds/musica_cidade.ogg",       -- Caminho do asset da música
+        platforms = {
+            {0, 220, 320}, -- Sua largura ajustada para o chão
+            {30, 180, 80},
+            {150, 150, 60},
+            {0, 120, 90},
+            {150, 90, 80},
+            {200, 60, 56}
+        },
+        enemies = {
+            --{"police", 180, 120, -1}, -- type, x, y, direction
+			{"police", 180, 120, -1}, -- type, x, y, direction
+            {"cat", 0, 0, 0} -- O gato agora é um inimigo especial, sua posição será gerenciada
+        },
+        bonuses = {
+            {"points", 100, 150}, -- type, x, y
+            {"life", 220, 100}
+        },
+        catSpawnPositions = { -- Posições possíveis para o gato aparecer neste nível
+            {x = 50, y = 150 - 10}, -- Ajuste: y_plataforma - altura_gato (se 10 for a altura do gato)
+            {x = 180, y = 120 - 10},
+            {x = 250, y = 80 - 10}
+        }
+    },
+    [2] = {
+        background = "assets/imagens/fundo_deserto.png",
+        music = "assets/sounds/musica_cidade.ogg",
+        platforms = {
+            {0, 220, 320}, -- Sua largura ajustada para o chão
+            {30, 180, 80},
+            {150, 150, 60},
+            {0, 120, 90},
+            {150, 90, 80},
+            {200, 60, 56}
+        },
+        enemies = {
+            {"escorpiao", 180, 120, -1}, -- type, x, y, direction
+            {"cat", 0, 0, 0} -- O gato agora é um inimigo especial, sua posição será gerenciada
+        },
+        bonuses = {
+            {"points", 100, 150}, -- type, x, y
+            {"life", 220, 100}
+        },
+        catSpawnPositions = { -- Posições possíveis para o gato aparecer neste nível
+            {x = 50, y = 150 - 10}, -- Ajuste: y_plataforma - altura_gato (se 10 for a altura do gato)
+            {x = 180, y = 120 - 10},
+            {x = 250, y = 80 - 10}
+        }
+    },
+	
+	[3] = {
+        background = "assets/imagens/fundo_fazenda.png",
+        music = "assets/sounds/musica_cidade.ogg",
+        platforms = {
+            {0, 220, 320}, -- Sua largura ajustada para o chão
+            {30, 180, 80},
+            {150, 150, 60},
+            {0, 120, 90},
+            {150, 90, 80},
+            {200, 60, 56}
+        },
+        enemies = {
+            {"trator", 180, 120, -1}, -- type, x, y, direction
+            {"cat", 0, 0, 0} -- O gato agora é um inimigo especial, sua posição será gerenciada
+        },
+        bonuses = {
+            {"points", 100, 150}, -- type, x, y
+            {"life", 220, 100}
+        },
+        catSpawnPositions = { -- Posições possíveis para o gato aparecer neste nível
+            {x = 50, y = 150 - 10}, -- Ajuste: y_plataforma - altura_gato (se 10 for a altura do gato)
+            {x = 180, y = 120 - 10},
+            {x = 250, y = 80 - 10}
+        }
+    },
+	[5] = {
+        background = "assets/imagens/fundo_noite.png",
+        music = "assets/sounds/musica_cidade.ogg",
+        platforms = {
+            {0, 220, 320}, -- Sua largura ajustada para o chão
+            {30, 180, 80},
+            {150, 150, 60},
+            {0, 120, 90},
+            {150, 90, 80},
+            {200, 60, 56}
+        },
+        enemies = {
+            {"police", 180, 120, -1}, -- type, x, y, direction
+            {"cat", 0, 0, 0} -- O gato agora é um inimigo especial, sua posição será gerenciada
+        },
+        bonuses = {
+            {"points", 100, 150}, -- type, x, y
+            {"life", 220, 100}
+        },
+        catSpawnPositions = { -- Posições possíveis para o gato aparecer neste nível
+            {x = 50, y = 150 - 10}, -- Ajuste: y_plataforma - altura_gato (se 10 for a altura do gato)
+            {x = 180, y = 120 - 10},
+            {x = 250, y = 80 - 10}
+        }
+    },
+    -- Adicione mais níveis aqui!
+}
 
--- ===================== UTILITÁRIOS =====================
-function engine.generateId()
-    local id = engine.nextEntityId
-    engine.nextEntityId = engine.nextEntityId + 1
-    return id
-end
-
-function engine.loadAsset(name, path, width, height)
-    local image = love.graphics.newImage(path)
-    engine.assets[name] = {
-        image = image,
-        width = width or image:getWidth(),
-        height = height or image:getHeight()
-    }
-    print("Imagem carregada: " .. name .. " (" .. path .. ")")
-end
-
--- ===================== MÓDULO DE FÍSICA =====================
-function engine.checkCollision(e1, e2)
-    if not (e1.x and e1.y and e1.width and e1.height and e2.x and e2.y and e2.width and e2.height) then
-        return false, "none"
+--------------------------------------------------------------------------------
+--- FUNÇÕES AUXILIARES
+--------------------------------------------------------------------------------
+local function startLevelTransition()
+    gameState = "levelTransition"
+    targetScore = score -- A pontuação atual do jogador é a meta
+    displayScore = targetScore - 500 -- Começa um pouco abaixo (os 500 pontos do bônus de fase)
+                                     -- ou você pode começar de 0 se preferir uma contagem completa
+    if displayScore < 0 then displayScore = 0 end -- Garante que não comece negativo
+    
+    -- Parar a música do nível (se estiver tocando)
+    if music.current then
+        music.current:stop()
     end
-    local e1_left, e1_right = e1.x, e1.x + e1.width
-    local e1_top, e1_bottom = e1.y, e1.y + e1.height
-    local e2_left, e2_right = e2.x, e2.x + e2.width
-    local e2_top, e2_bottom = e2.y, e2.y + e2.height
-
-    if e1_right > e2_left and e1_left < e2_right and e1_bottom > e2_top and e1_top < e2_bottom then
-        local overlapX = math.min(e1_right, e2_right) - math.max(e1_left, e2_left)
-        local overlapY = math.min(e1_bottom, e2_bottom) - math.max(e1_top, e2_top)
-
-        if overlapX < overlapY then
-            if e1_left < e2_left then return true, "right" else return true, "left" end
-        else
-            if e1_top < e2_top then return true, "bottom" else return true, "top" end
-        end
-    end
-    return false, "none"
+    -- Opcional: Tocar um som de "conclusão de fase"
+    -- sounds.level_complete:play() -- Você precisaria carregar este som em love.load()
+end
+-- Colisão AABB (Axis-Aligned Bounding Box)
+local function checkCollision(obj1, obj2)
+    return obj1.x < obj2.x + obj2.width and
+           obj1.x + obj1.width > obj2.x and
+           obj1.y < obj2.y + obj2.height and
+           obj1.y + obj1.height > obj2.y
 end
 
-function engine.resolveCollision(e1, e2, direction)
-    if direction == "bottom" then
-        e1.y = e2.y - e1.height
-        e1.dy = 0
-        if e1.canJump then e1.onGround = true end
-    elseif direction == "top" then
-        e1.y = e2.y + e2.height
-        e1.dy = 0
-    elseif direction == "left" then
-        e1.x = e2.x + e2.width
-        e1.dx = 0
-    elseif direction == "right" then
-        e1.x = e2.x - e1.width
-        e1.dx = 0
-    end
-end
+--------------------------------------------------------------------------------
+--- ENTIDADES E LÓGICA DO JOGO
+--------------------------------------------------------------------------------
 
--- ===================== MÓDULO DE ENTIDADES =====================
-function engine.createEntity(type, properties)
-    local entity = {
-        id = engine.generateId(),
-        type = type,
-        x = properties.x or 0,
-        y = properties.y or 0,
-        dx = properties.dx or 0,
-        dy = properties.dy or 0,
-        speed = properties.speed or 0,
-        sprite = properties.sprite,
-        width = properties.width,
-        height = properties.height,
-        direction = 1, -- 1 para direita, -1 para esquerda (usado para flipar sprite)
-        isAffectedByGravity = properties.isAffectedByGravity or false,
-        isSolid = properties.isSolid or false,
-        canJump = properties.canJump or false,
+-- Player
+local function createPlayer(x, y)
+    return {
+        x = x or 50,
+        y = y or 200,
+        width = 16,
+        height = 10,
+        dx = 0,
+        dy = 0,
         onGround = false,
-        patrol = properties.patrol
+        facingRight = true,
+        shootTimer = 0,
+        invincible = false,
+        invincibleTimer = 0,
+        flashTimer = 0,
+        flashVisible = true
     }
-    if entity.sprite and engine.assets[entity.sprite] and engine.assets[entity.sprite].image then
-        entity.width = entity.width or engine.assets[entity.sprite].width
-        entity.height = entity.height or engine.assets[entity.sprite].height
-    end
-    table.insert(engine.entities, entity)
-    return entity
 end
 
-function engine.removeEntity(id)
-    for i, e in ipairs(engine.entities) do
-        if e.id == id then table.remove(engine.entities, i) return true end
-    end
-    return false
-end
-
--- ===================== MÓDULO DE PREFABS =====================
-engine.prefabs = {} -- Tabela para armazenar os modelos de entidades
-
---- engine.definePrefab(name, defaultProperties)
--- Define um novo modelo (prefab) de entidade.
-function engine.definePrefab(name, defaultProperties)
-    if engine.prefabs[name] then
-        print("Atenção: Prefab '" .. name .. "' já existe e foi sobrescrito.")
-    end
-    engine.prefabs[name] = defaultProperties
-end
-
---- engine.createPrefab(name, instanceProperties)
--- Cria uma nova entidade baseada em um prefab existente.
-function engine.createPrefab(name, instanceProperties)
-    local prefab = engine.prefabs[name]
-    if not prefab then
-        error("Erro: Prefab '" .. name .. "' não definido. Crie-o com engine.definePrefab primeiro.")
+local function updatePlayer(dt)
+    -- Movimento horizontal
+    player.dx = 0
+    if love.keyboard.isDown("left") then
+        player.dx = -CONFIG.PLAYER_SPEED
+        player.facingRight = false
+    elseif love.keyboard.isDown("right") then
+        player.dx = CONFIG.PLAYER_SPEED
+        player.facingRight = true
     end
 
-    local finalProperties = {}
-    for k, v in pairs(prefab) do
-        finalProperties[k] = v
-    end
-    if instanceProperties then
-        for k, v in pairs(instanceProperties) do
-            finalProperties[k] = v
+    -- Aplica gravidade
+    player.dy = player.dy + CONFIG.GRAVITY * dt
+
+    -- Atualiza posição
+    player.x = player.x + player.dx * dt
+    player.y = player.y + player.dy * dt
+    -- Colisão com plataformas (tiles individuais)
+    player.onGround = false
+    for _, platTile in ipairs(platforms) do
+        if checkCollision(player, platTile) then
+            -- Se o jogador estava caindo e colidiu por cima
+            if player.dy > 0 and player.y + player.height - player.dy * dt <= platTile.y then
+                player.y = platTile.y - player.height
+                player.dy = 0
+                player.onGround = true
+            -- Se o jogador colidiu por baixo
+            elseif player.dy < 0 and player.y - player.dy * dt >= platTile.y + platTile.height then
+                 player.y = platTile.y + platTile.height
+                 player.dy = 0
+            end
+            platTile.painted = true -- Pinta o tile
         end
     end
 
-    return engine.createEntity(finalProperties.type or "default", finalProperties)
-end
-
--- ===================== ENTIDADES (ABSTRAÇÕES PARA CRIAÇÃO FÁCIL) =====================
-
---- engine.createPlayer(x, y, speed, spriteName)
--- Cria uma entidade de jogador pré-configurada usando um prefab.
-function engine.createPlayer(x, y, speed, spriteName)
-    if not engine.prefabs.Player then
-        engine.definePrefab("Player", {
-            type = "player",
-            speed = 200,
-            sprite = "player_sprite",
-            isAffectedByGravity = true,
-            isSolid = true,
-            canJump = true
-        })
-    end
-    local player = engine.createPrefab("Player", {x = x, y = y, speed = speed, sprite = spriteName})
-    engine.player = player
-    return player
-end
-
---- engine.createStaticEnemy(x, y, spriteName)
--- Cria uma entidade de inimigo que fica parada, afetada pela gravidade, usando um prefab.
-function engine.createStaticEnemy(x, y, spriteName)
-    if not engine.prefabs.StaticEnemy then
-        engine.definePrefab("StaticEnemy", {
-            type = "enemy",
-            speed = 0,
-            sprite = "enemy_sprite",
-            isAffectedByGravity = true,
-            isSolid = true
-        })
-    end
-    return engine.createPrefab("StaticEnemy", {x = x, y = y, sprite = spriteName})
-end
-
---- engine.createPatrollingEnemy(x, y, speed, minX, maxX, spriteName)
--- Cria uma entidade de inimigo que patrulha horizontalmente usando um prefab.
-function engine.createPatrollingEnemy(x, y, speed, minX, maxX, spriteName)
-    if not engine.prefabs.PatrollingEnemy then
-        engine.definePrefab("PatrollingEnemy", {
-            type = "enemy",
-            speed = 80,
-            sprite = "enemy_sprite",
-            isAffectedByGravity = true,
-            isSolid = true,
-            patrol = {}
-        })
-    end
-    return engine.createPrefab("PatrollingEnemy", {x = x, y = y, speed = speed, patrol = {minX = minX, maxX = maxX}, sprite = spriteName})
-end
-
---- engine.createPlatform(x, y, num_blocks, tile_sprite_name)
--- Cria uma plataforma composta por múltiplos blocos, que são entidades sólidas.
-function engine.createPlatform(x, y, num_blocks, tile_sprite_name)
-    local tile = engine.assets[tile_sprite_name]
-    if not tile then error("Asset de plataforma não encontrado: " .. tile_sprite_name) end
-
-    if not engine.prefabs.PlatformBlock then
-        engine.definePrefab("PlatformBlock", {
-            type = "platform_block",
-            isSolid = true,
-            sprite = tile_sprite_name -- Usa o sprite passado para a plataforma como padrão
-        })
+    -- Loop horizontal da tela
+    local playerHalfWidth = player.width / 2
+    if player.x > CONFIG.BASE_GAME_WIDTH - playerHalfWidth then
+        player.x = -playerHalfWidth -- Teleporta para o lado esquerdo
+    elseif player.x < -playerHalfWidth then
+        player.x = CONFIG.BASE_GAME_WIDTH - playerHalfWidth -- Teleporta para o lado direito
     end
 
-    for i = 0, num_blocks - 1 do
-        engine.createPrefab("PlatformBlock", {
-            x = x + i * tile.width,
-            y = y,
-            width = tile.width,
-            height = tile.height,
-            sprite = tile_sprite_name -- Garante que cada bloco use o sprite correto
-        })
+    -- Atualiza cooldown do tiro
+    if player.shootTimer > 0 then
+        player.shootTimer = player.shootTimer - dt
+    end
+
+    -- Atualiza invencibilidade
+    if player.invincible then
+        player.invincibleTimer = player.invincibleTimer - dt
+        player.flashTimer = player.flashTimer - dt
+        if player.flashTimer <= 0 then
+            player.flashVisible = not player.flashVisible
+            player.flashTimer = 0.1
+        end
+        if player.invincibleTimer <= 0 then
+            player.invincible = false
+            player.flashVisible = true
+        end
     end
 end
 
--- ===================== MÓDULO DE CÂMERA =====================
-engine.camera = {
-    x = 0,
-    y = 0,
-    target = nil,
-    shakeIntensity = 0,
-    shakeDuration = 0,
-    shakeTimer = 0,
-    minX = 0,
-    maxX = engine.config.windowWidth,
-    minY = 0,
-    maxY = engine.config.windowHeight
-}
-
---- engine.camera.setLimits(minX, maxX, minY, maxY)
--- Define os limites pelos quais a câmera pode se mover.
-function engine.camera.setLimits(minX, maxX, minY, maxY)
-    engine.camera.minX = minX
-    engine.camera.maxX = maxX - engine.config.windowWidth
-    engine.camera.minY = minY
-    engine.camera.maxY = maxY - engine.config.windowHeight
-end
-
---- engine.camera.follow(entity)
--- Define uma entidade para a câmera seguir.
-function engine.camera.follow(entity)
-    engine.camera.target = entity
-end
-
---- engine.camera.shake(intensity, duration)
--- Aplica um efeito de "tremor" na câmera.
-function engine.camera.shake(intensity, duration)
-    engine.camera.shakeIntensity = intensity
-    engine.camera.shakeDuration = duration
-    engine.camera.shakeTimer = duration
-end
-
---- engine.camera.update(dt)
--- Atualiza a posição da câmera a cada frame.
-function engine.camera.update(dt)
-    if engine.camera.target then
-        local target = engine.camera.target
-        local centerX = target.x + target.width / 2
-        local centerY = target.y + target.height / 2
-
-        engine.camera.x = centerX - engine.config.windowWidth / 2
-        engine.camera.y = centerY - engine.config.windowHeight / 2
-
-        engine.camera.x = math.max(engine.camera.minX, math.min(engine.camera.maxX, engine.camera.x))
-        engine.camera.y = math.max(engine.camera.minY, math.min(engine.camera.maxY, engine.camera.y))
+local function drawPlayer()
+    if player.invincible and not player.flashVisible then
+        return -- Não desenha se estiver invencível e piscando
     end
 
-    if engine.camera.shakeTimer > 0 then
-        engine.camera.shakeTimer = engine.camera.shakeTimer - dt
-        local offsetX = math.random() * engine.camera.shakeIntensity * 2 - engine.camera.shakeIntensity
-        local offsetY = math.random() * engine.camera.shakeIntensity * 2 - engine.camera.shakeIntensity
-        love.graphics.translate(offsetX, offsetY)
-    else
-        engine.camera.shakeIntensity = 0
+    local img = assets.car
+    local scaleX = 1
+    if not player.facingRight then
+        scaleX = -1
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(img, player.x + player.width / 2, player.y + player.height / 2, 0, scaleX, 1, img:getWidth() / 2, img:getHeight() / 2)
+end
+
+local function playerJump()
+    if player.onGround then
+        player.dy = CONFIG.JUMP_VELOCITY
+        player.onGround = false
+        sounds.jump:play()
     end
 end
 
--- ===================== MÓDULO DE PARTÍCULAS =====================
-engine.particles = {}
-engine.particles.emitters = {}
+local function playerShoot()
+    if player.shootTimer <= 0 then
+        local proj = {
+            x = player.x + (player.facingRight and player.width or -assets.projectile:getWidth()),
+            y = player.y + player.height / 2 - assets.projectile:getHeight() / 2,
+            width = assets.projectile:getWidth(),
+            height = assets.projectile:getHeight(),
+            dx = player.facingRight and CONFIG.PROJECTILE_SPEED or -CONFIG.PROJECTILE_SPEED
+        }
+        table.insert(projectiles, proj)
+        player.shootTimer = CONFIG.SHOOT_COOLDOWN
+        sounds.shoot:play()
+    end
+end
 
---- engine.particles.newEmitter(x, y, properties)
--- Cria e retorna um novo sistema de partículas.
-function engine.particles.newEmitter(x, y, properties)
-    properties = properties or {}
-    local emitter = {
+local function playerHit()
+    player.invincible = true
+    player.invincibleTimer = CONFIG.INVINCIBLE_TIME
+    player.flashTimer = 0.1
+    player.flashVisible = true
+end
+
+local function playerResetPosition(startX, startY)
+    player.x = startX or 50
+    player.y = startY or 200
+    player.dx = 0
+    player.dy = 0
+    player.onGround = false
+    projectiles = {} -- Limpa projéteis
+    player.shootTimer = 0
+    player.invincible = false
+    player.invincibleTimer = 0
+    player.flashTimer = 0
+    player.flashVisible = true
+end
+
+---
+--- **Enemy Logic (com ajustes para o Gato)**
+---
+
+local function createEnemy(type, x, y, direction)
+    local self = {
+        type = type,
         x = x,
         y = y,
-        sprite = properties.sprite,
-        color = properties.color or {1, 1, 1, 1},
-        startSize = properties.startSize or 8,
-        endSize = properties.endSize or 0,
-        lifeTime = properties.lifeTime or 1,
-        speed = properties.speed or 50,
-        spread = properties.spread or 360,
-        emissionRate = properties.emissionRate or 20,
-        duration = properties.duration or 0,
-        gravityFactor = properties.gravityFactor or 0,
-        minAngle = properties.minAngle,
-        maxAngle = properties.maxAngle,
-        burst = properties.burst or 0,
-        
-        particles = {},
-        timeToEmit = 0,
-        emitterTimer = 0,
-        isDead = false
+        dx = 0,
+        dy = 0,
+        width = 0,
+        height = 0,
+        speed = 0,
+        direction = direction or 1,
+        initialX = x,
+        initialY = y,
+        initialDirection = direction or 1,
+        active = true,
+        respawnTimer = CONFIG.ENEMY_RESPAWN_TIME,
+        hit = false,
+        hitDirectionX = 0,
+        rotation = 0,
+        rotationSpeed = 0,
+        isCat = false,
+        catTimer = 0,
+        currentCatSpawnPosition = nil,
+        catState = "inactive" -- Novo estado: "inactive", "warning", "active"
     }
 
-    function emitter:update(dt)
-        if self.isDead then return end
+    if type == "police" then
+        self.width = 24
+        self.height = 12
+        self.speed = 60
+        self.dx = self.direction * self.speed
+		
+	elseif type == "abelha" then
+        self.width = 24
+        self.height = 12
+        self.speed = 60
+        self.dx = self.direction * self.speed
+		
+	elseif type == "escorpiao" then
+        self.width = 24
+        self.height = 12
+        self.speed = 60
+        self.dx = self.direction * self.speed
+	elseif type == "trator" then
+        self.width = 24
+        self.height = 12
+        self.speed = 60
+        self.dx = self.direction * self.speed
+    elseif type == "cat" then
+        self.isCat = true
+        self.width = 16
+        self.height = 10
+        self.speed = 0
+        self.dx = 0
+        self.respawnTimer = CONFIG.CAT_SPAWN_INTERVAL
+        self.catTimer = CONFIG.CAT_LIFETIME
+        self.active = false -- Gato começa inativo
+        self.catState = "inactive" -- Gato começa inativo
+        -- A posição inicial será definida quando o nível for carregado ou quando ele for spawndado
+    end
+    return self
+end
 
-        self.emitterTimer = self.emitterTimer + dt
+local function updateEnemies(dt) -- <<--- ESTA FUNÇÃO ESTAVA FALTANDO O "FUNCTION"
+    for i = #enemies, 1, -1 do
+        local enemy = enemies[i]
 
-        if self.duration == 0 or self.emitterTimer <= self.duration then
-            self.timeToEmit = self.timeToEmit + dt
-            while self.timeToEmit >= 1 / self.emissionRate do
-                self.timeToEmit = self.timeToEmit - (1 / self.emissionRate)
-                self:createParticle()
+        if enemy.isCat then
+            -- Lógica para o Gato
+            if enemy.catState == "active" then
+                enemy.catTimer = enemy.catTimer - dt
+                if enemy.catTimer <= 0 then
+                    enemy.active = false
+                    enemy.catState = "inactive"
+                    enemy.respawnTimer = CONFIG.CAT_SPAWN_INTERVAL
+                end
+            elseif enemy.catState == "warning" then
+                enemy.catTimer = enemy.catTimer - dt
+                if enemy.catTimer <= 0 then
+                    enemy.active = true -- Ativa o gato
+                    enemy.catState = "active"
+                    enemy.catTimer = CONFIG.CAT_LIFETIME
+                end
+            elseif enemy.catState == "inactive" then
+                enemy.respawnTimer = enemy.respawnTimer - dt
+                if enemy.respawnTimer <= 0 then
+                    -- Escolhe uma nova posição para o spawn do gato
+                    local levelData = levels[currentLevel]
+                    if levelData and #levelData.catSpawnPositions > 0 then
+                        local pos = levelData.catSpawnPositions[math.random(1, #levelData.catSpawnPositions)]
+                        enemy.x = pos.x
+                        enemy.y = pos.y
+                        
+                        enemy.catState = "warning" -- Entra no estado de aviso
+                        enemy.catTimer = CONFIG.CAT_WARNING_TIME -- Define o timer para o tempo de aviso
+                    else
+                        -- Caso não haja posições de spawn definidas para este nível,
+                        -- o gato permanece inativo e o respawnTimer continua contando.
+                        enemy.respawnTimer = CONFIG.CAT_SPAWN_INTERVAL -- Reseta para tentar de novo
+                    end
+                end
             end
-        elseif self.duration > 0 and self.emitterTimer > self.duration then
-            if #self.particles == 0 then
-                self.isDead = true
-            end
-        end
+            enemy.dx = 0
+            enemy.dy = 0
+            enemy.rotation = 0
+        -- A partir daqui, a lógica para inimigos normais (non-cat enemies)
+        elseif enemy.active then
+            -- Aplica gravidade
+            enemy.dy = enemy.dy + CONFIG.GRAVITY * dt
+            enemy.y = enemy.y + enemy.dy * dt
 
-        for i = #self.particles, 1, -1 do
-            local p = self.particles[i]
-            p.life = p.life - dt
+            if enemy.hit then
+                enemy.x = enemy.x + enemy.hitDirectionX * dt
+                enemy.rotation = enemy.rotation + enemy.rotationSpeed * dt
 
-            if p.life <= 0 then
-                table.remove(self.particles, i)
+                -- Verifica se o inimigo atingido saiu da tela ou caiu muito
+                if enemy.x < -enemy.width or enemy.x > CONFIG.BASE_GAME_WIDTH + enemy.width or enemy.y > CONFIG.BASE_GAME_HEIGHT + enemy.height then
+                    enemy.active = false
+                    enemy.respawnTimer = CONFIG.ENEMY_RESPAWN_TIME
+                    enemy.hit = false
+                    enemy.rotation = 0
+                    enemy.rotationSpeed = 0
+                    enemy.dx = 0
+                    enemy.dy = 0
+                end
             else
-                if self.gravityFactor ~= 0 then
-                    p.dy = p.dy + engine.config.gravityStrength * self.gravityFactor * dt
+                -- Colisão com plataforma para inimigos normais
+                for _, plat in ipairs(platforms) do
+                    if checkCollision(enemy, plat) and enemy.y + enemy.height - enemy.dy * dt <= plat.y then
+                        enemy.y = plat.y - enemy.height
+                        enemy.dy = 0
+                        break
+                    end
                 end
 
-                p.x = p.x + p.dx * dt
-                p.y = p.y + p.dy * dt
-
-                local lifeRatio = p.life / p.initialLife
-                p.currentSize = self.startSize + (self.endSize - self.startSize) * (1 - lifeRatio)
-                
-                if self.color then
-                    p.currentColor = {self.color[1], self.color[2], self.color[3], self.color[4] * lifeRatio}
+                if enemy.type == "police" or enemy.type == "abelha" or enemy.type == "escorpiao" or enemy.type == "trator" then
+                    if player.x < enemy.x then
+                        enemy.direction = -1
+                    else
+                        enemy.direction = 1
+                    end
+                    enemy.dx = enemy.direction * enemy.speed
                 end
+				
+				
+                enemy.x = enemy.x + enemy.dx * dt
+
+                -- Inimigos também loopam horizontalmente se saírem da tela.
+                if enemy.x > CONFIG.BASE_GAME_WIDTH then
+                    enemy.x = -enemy.width
+                elseif enemy.x < -enemy.width then
+                    enemy.x = CONFIG.BASE_GAME_WIDTH
+                end
+            end
+        else -- Inimigo normal inativo: atualiza o timer de respawn
+            enemy.respawnTimer = enemy.respawnTimer - dt
+            if enemy.respawnTimer <= 0 then
+                enemy.active = true
+                enemy.x = enemy.initialX
+                enemy.y = enemy.initialY
+                enemy.direction = enemy.initialDirection
+                enemy.respawnTimer = CONFIG.ENEMY_RESPAWN_TIME
+                enemy.hit = false
+                enemy.rotation = 0
+                enemy.dx = enemy.direction * enemy.speed
+                enemy.dy = 0
             end
         end
     end
+end
 
-    function emitter:createParticle()
-        local angle = (self.minAngle and self.maxAngle) and math.random(self.minAngle * 100, self.maxAngle * 100) / 100 or math.random() * math.pi * 2
-        local speed = self.speed * (0.8 + math.random() * 0.4)
-        
-        local dx = math.cos(angle) * speed
-        local dy = math.sin(angle) * speed
-        
-        local particle = {
-            x = self.x,
-            y = self.y,
-            dx = dx,
-            dy = dy,
-            life = self.lifeTime,
-            initialLife = self.lifeTime,
-            currentSize = self.startSize,
-            currentColor = self.color
-        }
-        table.insert(self.particles, particle)
-    end
-
-    function emitter:draw()
-        if self.isDead and #self.particles == 0 then return end
-
-        if self.sprite and engine.assets[self.sprite] then
-            local img = engine.assets[self.sprite].image
-            for _, p in ipairs(self.particles) do
-                local s = p.currentSize / img:getWidth()
-                love.graphics.setColor(p.currentColor[1], p.currentColor[2], p.currentColor[3], p.currentColor[4])
-                love.graphics.draw(img, p.x, p.y, 0, s, s, img:getWidth()/2, img:getHeight()/2)
+local function drawEnemies()
+    for _, enemy in ipairs(enemies) do
+        if enemy.isCat then -- Só desenha o gato se ele for ativo ou estiver avisando
+            if enemy.catState == "active" then
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.draw(assets.cat, enemy.x, enemy.y)
+            elseif enemy.catState == "warning" then
+                -- Desenha o ícone de aviso
+                local alpha = math.sin(love.timer.getTime() * 8) * 0.5 + 0.5 -- Pulsa o alpha de 0.5 a 1
+                love.graphics.setColor(1, 1, 1, alpha)
+                love.graphics.draw(assets.cat_warning, enemy.x + enemy.width/2 - assets.cat_warning:getWidth()/2, enemy.y + enemy.height/2 - assets.cat_warning:getHeight()/2)
+                love.graphics.setColor(1, 1, 1, 1) -- Reseta a cor
             end
-        elseif self.color then
-            for _, p in ipairs(self.particles) do
-                love.graphics.setColor(p.currentColor[1], p.currentColor[2], p.currentColor[3], p.currentColor[4])
-                love.graphics.circle("fill", p.x, p.y, p.currentSize / 2)
+        elseif enemy.active then -- Lógica para inimigos normais (não gato)
+            local img
+            if enemy.type == "police" then
+                img = assets.police
             end
+			if enemy.type == "abelha" then
+                img = assets.abelha
+            end
+			if enemy.type == "escorpiao" then
+                img = assets.escorpiao
+            end
+			
+			if enemy.type == "trator" then
+                img = assets.trator
+            end
+            local scaleX = 1
+            if enemy.direction == -1 then
+                scaleX = -1
+            end
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(img, enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, enemy.rotation, scaleX, 1, img:getWidth() / 2, img:getHeight() / 2)
         end
-        love.graphics.setColor(1, 1, 1, 1)
-    end
-
-    for i = 1, emitter.burst do
-        emitter:createParticle()
-    end
-
-    table.insert(engine.particles.emitters, emitter)
-    return emitter
-end
-
--- ===================== MÓDULO DE GERENCIAMENTO DE ESTADOS/CENAS =====================
-engine.stateManager = {
-    currentState = nil,
-    states = {}
-}
-
---- engine.stateManager.addState(name, stateTable)
--- Adiciona uma nova definição de estado/cena.
-function engine.stateManager.addState(name, stateTable)
-    if engine.stateManager.states[name] then
-        print("Atenção: Estado '" .. name .. "' já existe e foi sobrescrito.")
-    end
-    engine.stateManager.states[name] = stateTable
-end
-
---- engine.stateManager.changeState(name)
--- Muda para um novo estado.
-function engine.stateManager.changeState(name)
-    local newState = engine.stateManager.states[name]
-    if not newState then
-        error("Erro: Estado '" .. name .. "' não definido. Adicione-o com engine.stateManager.addState primeiro.")
-    end
-
-    -- Limpa a engine para o novo estado
-    engine.entities = {}
-    engine.particles.emitters = {}
-    engine.nextEntityId = 1
-    engine.player = nil -- Reinicia a referência ao player
-    engine.camera.target = nil
-
-    engine.stateManager.currentState = newState
-    if engine.stateManager.currentState.load then
-        engine.stateManager.currentState.load()
     end
 end
 
--- ===================== MÓDULO DE ÁUDIO =====================
-engine.audio = {
-    sources = {},
-    currentMusic = nil
-}
+---
+--- **Bonus Logic**
+---
 
---- engine.audio.loadSound(name, path, isMusic, isLooping)
--- Carrega um arquivo de áudio e o armazena na engine.assets.
-function engine.audio.loadSound(name, path, isMusic, isLooping)
-    isMusic = isMusic or false
-    isLooping = isLooping or false
-
-    local source = love.audio.newSource(path, isMusic and "stream" or "static")
-    source:setLooping(isLooping)
-    engine.assets[name] = {
-        type = "audio",
-        source = source,
-        isMusic = isMusic
+local function createBonus(type, x, y)
+    local self = {
+        type = type, -- "points", "life"
+        x = x,
+        y = y,
+        width = CONFIG.PLATFORM_TILE_WIDTH,
+        height = CONFIG.PLATFORM_TILE_HEIGHT,
+        active = true,
+        initialX = x,
+        initialY = y,
+        respawnTimer = CONFIG.BONUS_RESPAWN_TIME
     }
-    print("Áudio carregado: " .. name .. " (" .. path .. ")")
+    return self
 end
 
---- engine.audio.playSound(name, volumeOverride)
--- Toca um efeito sonoro (SFX).
-function engine.audio.playSound(name, volumeOverride)
-    local asset = engine.assets[name]
-    if asset and asset.type == "audio" and not asset.isMusic then
-        local volume = volumeOverride or engine.config.sfxVolume
-        asset.source:setVolume(volume * engine.config.masterVolume)
-        asset.source:play()
-    else
-        print("Atenção: SFX '" .. name .. "' não encontrado ou não é um SFX válido.")
+local function updateBonuses(dt)
+    for _, bonus in ipairs(bonuses) do
+        if not bonus.active then
+            bonus.respawnTimer = bonus.respawnTimer - dt
+            if bonus.respawnTimer <= 0 then
+                bonus.active = true
+                bonus.x = bonus.initialX -- Volta para a posição inicial
+                bonus.y = bonus.initialY
+                bonus.respawnTimer = CONFIG.BONUS_RESPAWN_TIME -- Reseta o timer
+            end
+        end
     end
 end
 
---- engine.audio.playMusic(name, fadeDuration)
--- Toca uma faixa de música.
-function engine.audio.playMusic(name, fadeDuration)
-    fadeDuration = fadeDuration or 0
-    local newMusicAsset = engine.assets[name]
+local function drawBonuses()
+    for _, bonus in ipairs(bonuses) do
+        if bonus.active then
+            local img
+            if bonus.type == "points" then
+                img = assets.bonus_points
+            elseif bonus.type == "life" then
+                img = assets.bonus_life
+            end
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(img, bonus.x, bonus.y)
+        end
+    end
+end
 
-    if not (newMusicAsset and newMusicAsset.type == "audio" and newMusicAsset.isMusic) then
-        print("Atenção: Música '" .. name .. "' não encontrada ou não é uma música válida.")
+---
+--- **Platform Logic**
+---
+
+local function createPlatformTile(x, y)
+    return {
+        x = x,
+        y = y,
+        width = CONFIG.PLATFORM_TILE_WIDTH,
+        height = CONFIG.PLATFORM_TILE_HEIGHT,
+        painted = false
+    }
+end
+
+-- Gera plataformas para um nível
+local function generatePlatforms(levelPlatformsData)
+    platforms = {} -- Limpa plataformas existentes
+    for _, platData in ipairs(levelPlatformsData) do
+        local startX = platData[1]
+        local y = platData[2]
+        local totalWidth = platData[3]
+        local numTiles = math.ceil(totalWidth / CONFIG.PLATFORM_TILE_WIDTH)
+
+        for i = 0, numTiles - 1 do
+            local tileX = startX + i * CONFIG.PLATFORM_TILE_WIDTH
+            table.insert(platforms, createPlatformTile(tileX, y))
+        end
+    end
+end
+
+local function drawPlatforms()
+    local img = assets.platform_tile
+    for _, platTile in ipairs(platforms) do
+        if platTile.painted then
+            love.graphics.setColor(0.5, 0.5, 1, 1) -- Azul claro para tiles pintados
+        else
+            love.graphics.setColor(1, 1, 1, 1) -- Branco padrão para tiles não pintados
+        end
+        love.graphics.draw(img, platTile.x, platTile.y)
+    end
+    love.graphics.setColor(1, 1, 1, 1) -- Reseta a cor para o próximo desenho
+end
+
+---
+--- **HUD Logic**
+---
+
+local hudFont
+local gameOverFont
+
+local function initHUD()
+    hudFont = love.graphics.newFont(8)
+    gameOverFont = love.graphics.newFont(16)
+end
+
+local function drawHUD()
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setFont(hudFont)
+    love.graphics.print("SCORE: " .. score, 5, 5)
+    love.graphics.print("LIVES: " .. lives, 100, 5)
+    love.graphics.print("LEVEL: " .. currentLevel, 200, 5)
+end
+
+--------------------------------------------------------------------------------
+--- GERENCIAMENTO DE NÍVEIS
+--------------------------------------------------------------------------------
+
+local function loadLevel(levelNum)
+    local levelData = levels[levelNum]
+    if not levelData then
+        print("Fim de jogo! Todos os níveis completos!")
+        gameState = "gamewin" -- Novo estado para vitória!
+        finalScore = score -- Salva a pontuação final
         return
     end
 
-    if engine.audio.currentMusic and engine.audio.currentMusic.source:isPlaying() then
-        if engine.audio.currentMusic ~= newMusicAsset then
-            engine.audio.currentMusic.source:stop()
-        else
-            return
-        end
+    -- Para a música, pare a anterior e toque a nova
+    if music.current then
+        music.current:stop()
+        music.current = nil -- Limpa a referência
     end
+    music.current = love.audio.newSource(levelData.music, "stream")
+    music.current:setLooping(true)
+    music.current:play()
 
-    engine.audio.currentMusic = newMusicAsset
-    
-    -- Para um fade suave, um sistema de tweening seria melhor aqui.
-    -- Por simplicidade, definimos o volume alvo diretamente.
-    local targetVolume = engine.config.musicVolume * engine.config.masterVolume
-    engine.audio.currentMusic.source:setVolume(targetVolume)
-    engine.audio.currentMusic.source:play()
-end
+    -- Carrega o fundo do nível
+    fundoAtual = love.graphics.newImage(levelData.background)
 
---- engine.audio.stopMusic()
--- Para a música atualmente tocando.
-function engine.audio.stopMusic()
-    if engine.audio.currentMusic and engine.audio.currentMusic.source:isPlaying() then
-        engine.audio.currentMusic.source:stop()
-        engine.audio.currentMusic = nil
-    end
-end
-
---- engine.audio.setMasterVolume(volume)
--- Define o volume mestre global.
-function engine.audio.setMasterVolume(volume)
-    engine.config.masterVolume = math.max(0, math.min(1, volume))
-    love.audio.setVolume(engine.config.masterVolume) -- LÖVE2D tem um volume global próprio
-    
-    if engine.audio.currentMusic and engine.audio.currentMusic.source:isPlaying() then
-        engine.audio.currentMusic.source:setVolume(engine.config.musicVolume * engine.config.masterVolume)
-    end
-end
-
---- engine.audio.setMusicVolume(volume)
--- Define o volume da música.
-function engine.audio.setMusicVolume(volume)
-    engine.config.musicVolume = math.max(0, math.min(1, volume))
-    if engine.audio.currentMusic and engine.audio.currentMusic.source:isPlaying() then
-        engine.audio.currentMusic.source:setVolume(engine.config.musicVolume * engine.config.masterVolume)
-    end
-end
-
---- engine.audio.setSfxVolume(volume)
--- Define o volume dos efeitos sonoros.
-function engine.config.sfxVolume(volume)
-    engine.config.sfxVolume = math.max(0, math.min(1, volume))
-end
-
--- ===================== UPDATE PRINCIPAL =====================
-function engine.update(dt)
-    -- Lógica de input do jogador (específico para o tipo 'player' e se 'canJump' for true)
-    if engine.player and engine.player.canJump then
-        engine.player.onGround = false
-        if love.keyboard.isDown("left") then
-            engine.player.dx = -engine.player.speed
-            engine.player.direction = -1
-        elseif love.keyboard.isDown("right") then
-            engine.player.dx = engine.player.speed
-            engine.player.direction = 1
-        else
-            engine.player.dx = 0
-        end
-
-        -- Aplica limites da tela ao jogador, se a configuração estiver ativa
-        if engine.config.limitEntitiesToWindow then
-            engine.player.x = math.max(0, math.min(engine.config.windowWidth - engine.player.width, engine.player.x))
-            -- O limite Y inferior é gerenciado por colisões, mas um "fallback" pode ser necessário
-            engine.player.y = math.min(engine.config.windowHeight - engine.player.height, engine.player.y)
-        end
-    end
-
-    -- Atualizar todas as entidades
-    for _, e in ipairs(engine.entities) do
-        if e.isAffectedByGravity and engine.config.gravityStrength > 0 then
-            e.dy = e.dy + engine.config.gravityStrength * dt
-        end
-        e.x = e.x + e.dx * dt
-        e.y = e.y + e.dy * dt
-
-        if e.type == "enemy" and e.patrol then
-            e.x = e.x + e.speed * e.direction * dt
-            if (e.direction == 1 and e.x + e.width >= e.patrol.maxX) or
-               (e.direction == -1 and e.x <= e.patrol.minX) then
-                e.direction = -e.direction
+    -- Reinicia elementos do jogo para o novo nível
+    generatePlatforms(levelData.platforms)
+    enemies = {}
+    for _, data in ipairs(levelData.enemies) do
+        local newEnemy = createEnemy(data[1], data[2], data[3], data[4])
+        -- Se for um gato, inicializa a posição de spawn
+        if newEnemy.isCat then
+            if levelData.catSpawnPositions and #levelData.catSpawnPositions > 0 then
+                local pos = levelData.catSpawnPositions[math.random(1, #levelData.catSpawnPositions)]
+                newEnemy.x = pos.x
+                newEnemy.y = pos.y
+            else
+                -- Fallback se não houver posições definidas (gato não aparecerá)
+                newEnemy.active = false
             end
         end
-
-        -- Aplica limites da tela para entidades NÃO-jogador, se configurado
-        if engine.config.limitEntitiesToWindow and e.type ~= "player" then
-            e.x = math.max(0, math.min(engine.config.windowWidth - e.width, e.x))
-            e.y = math.min(engine.config.windowHeight - e.height, e.y) -- Previne cair para sempre
-        end
+        table.insert(enemies, newEnemy)
+    end
+    bonuses = {}
+    for _, data in ipairs(levelData.bonuses) do
+        table.insert(bonuses, createBonus(data[1], data[2], data[3]))
     end
 
-    -- Atualização da câmera
-    engine.camera.update(dt)
-
-    -- Atualização do sistema de partículas
-    for i = #engine.particles.emitters, 1, -1 do
-        local emitter = engine.particles.emitters[i]
-        emitter:update(dt)
-        if emitter.isDead then
-            table.remove(engine.particles.emitters, i)
-        end
-    end
-
-    -- Resolução de colisões entre entidades
-    for i, e1 in ipairs(engine.entities) do
-        for j, e2 in ipairs(engine.entities) do
-            if e1.id ~= e2.id and e2.isSolid then
-                local colidiu, dir = engine.checkCollision(e1, e2)
-                if colidiu then
-                    engine.resolveCollision(e1, e2, dir)
-                    if e1.type == "player" and e2.type == "enemy" then
-                        if dir == "bottom" then
-                            engine.removeEntity(e2.id)
-                            e1.dy = -200
-                            engine.audio.playSound("hit_sfx") -- Som de pisar no inimigo
-                            engine.particles.newEmitter(e2.x + e2.width/2, e2.y + e2.height/2, {
-                                color = {1, 0, 0, 1}, startSize = 15, endSize = 5, lifeTime = 0.4, speed = 100, burst = 20, duration = 0.01
-                            })
-                        else
-                            -- Lógica para quando o jogador é atingido pelo inimigo
-                            -- Por enquanto, apenas um print e som, pode levar a game over
-                            print("Jogador foi atingido!")
-                            engine.audio.playSound("hit_sfx") -- Som de ser atingido
-                            engine.camera.shake(5, 0.2)
-                            -- Aqui você poderia adicionar lógica de vida do jogador ou mudar para Game Over
-                            -- engine.stateManager.changeState("GameOver")
-                        end
-                    end
-                end
-            end
-        end
-    end
+    -- Reseta a posição do jogador para o início do novo nível
+    playerResetPosition()
 end
 
--- ===================== DRAW PRINCIPAL =====================
-function engine.draw()
-    love.graphics.push()
-    love.graphics.translate(-engine.camera.x, -engine.camera.y)
+--------------------------------------------------------------------------------
+--- FUNÇÕES LOVE2D PRINCIPAIS
+--------------------------------------------------------------------------------
+-- main.lua (Adicione esta nova função, ex: antes de love.load())
 
-    -- Desenha o fundo
-    if engine.assets.background then
-        love.graphics.draw(engine.assets.background.image, 0, 0)
-    end
+-- Função para reiniciar o estado completo do jogo
+function resetGame()
+    -- Reinicia o jogador
+    player = createPlayer() -- Cria uma nova instância do jogador
+    score = 0
+    lives = 3
+    player.invincible = false
+    player.invincibleTimer = 0
+    player.flashTimer = 0
+    player.flashVisible = true
 
-    -- Desenha todas as entidades do mundo
-    for _, e in ipairs(engine.entities) do
-        if e.sprite and engine.assets[e.sprite] and engine.assets[e.sprite].image then
-            local asset = engine.assets[e.sprite]
-            local img = asset.image
-            local scaleX = e.direction
-            local offsetX = (scaleX == -1) and e.width or 0
-            love.graphics.draw(img, e.x + offsetX, e.y, 0, scaleX, 1)
-        elseif e.type == "platform_block" then
-            love.graphics.setColor(0.5, 0.3, 0.1, 1)
-            love.graphics.rectangle("fill", e.x, e.y, e.width, e.height)
-            love.graphics.setColor(1, 1, 1, 1)
-        else
-            love.graphics.setColor(1, 0, 0, 0.5) -- Entidades sem sprite específico
-            love.graphics.rectangle("fill", e.x, e.y, e.width, e.height)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
+    -- Reinicia o nível
+    currentLevel = 1 -- Sempre começa na fase 1
+    loadLevel(currentLevel) -- Carrega os dados da primeira fase
 
-        -- Desenho de debug (retângulo de colisão) se ativado
-        if engine.config.debugDraw then
-            love.graphics.setColor(1, 0, 0, 0.7)
-            love.graphics.rectangle("line", e.x, e.y, e.width, e.height)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
-    end
-
-    -- Desenha as partículas
-    for _, emitter in ipairs(engine.particles.emitters) do
-        emitter:draw()
-    end
-
-    love.graphics.pop() -- Restaura as transformações para desenhar o HUD na tela fixa
-
-    -- Desenhos de HUD (Heads-Up Display) vão aqui
-    -- love.graphics.print("Pontos: 0", 10, 10)
+    -- Limpa projéteis e bônus que podem ter ficado de uma partida anterior
+    projectiles = {}
+    bonuses = {}
+    enemies = {} -- Eles serão recriados pelo loadLevel()
 end
 
--- ===================== LOVE CALLBACKS (PRINCIPAIS) =====================
 function love.load()
-    love.window.setMode(engine.config.windowWidth, engine.config.windowHeight)
-    love.window.setTitle("Mini Engine 2D")
+    -- Configuração de janela
+    love.window.setTitle("Vidade Aventura!")
+    love.window.setMode(800, 600, {resizable = true, minwidth = 256, minheight = 240, vsync = true})
+    love.graphics.setDefaultFilter("nearest", "nearest")
+	
+	-- NOVOS ASSETS PARA O MENU / TELAS FINAIS
+    assets.menuBackground = love.graphics.newImage("assets/imagens/fundo_menu.png") -- VOCÊ PRECISA CRIAR ESTA IMAGEM!
+    assets.gameOverScreen = love.graphics.newImage("assets/imagens/game_over_screen.png") -- Imagem para tela de Game Over (OPCIONAL)
+    assets.victoryScreen = love.graphics.newImage("assets/imagens/victory_screen.png")   -- Imagem para tela de Vitória (OPCIONAL)
 
-    -- Carregamento de Assets (imagens e áudio)
-    engine.loadAsset("background", "assets/imagens/fundo_cidade.png")
-    engine.loadAsset("player_sprite", "assets/imagens/car.png")
-    engine.loadAsset("enemy_sprite", "assets/imagens/enemy.png")
-    engine.loadAsset("platform_tile", "assets/imagens/platform_tile.png", 32, 32)
-    engine.loadAsset("spark_particle", "assets/imagens/spark.png")
-    engine.loadAsset("smoke_particle", "assets/imagens/smoke.png")
-    engine.loadAsset("gem_sprite", "assets/imagens/gem.png")
+    -- NOVAS FONTES
+    assets.titleFont = love.graphics.newFont("assets/fonts/stocky.ttf", 32) -- Fonte para o título (crie essa fonte!)
+    assets.menuFont = love.graphics.newFont("assets/fonts/stocky.ttf", 16)  -- Fonte para as opções e HUD
+    assets.bigFont = love.graphics.newFont("assets/fonts/stocky.ttf", 24)   -- Fonte maior para Game Over/Victory
+	
+    -- Carregamento de Assets
+	assets.projectile = love.graphics.newImage("assets/imagens/projectile.png")
+    assets.car = love.graphics.newImage("assets/imagens/car.png")
+	
+	
+    assets.police = love.graphics.newImage("assets/imagens/police.png")
+	assets.abelha = love.graphics.newImage("assets/imagens/abelha.png")
+	assets.escorpiao = love.graphics.newImage("assets/imagens/escorpiao.png")
+	assets.trator = love.graphics.newImage("assets/imagens/trator.png")
+	
+    assets.cat = love.graphics.newImage("assets/imagens/cat.png")
+    assets.cat_warning = love.graphics.newImage("assets/imagens/cat_warning.png") -- Novo asset!
+	
+    
+    assets.platform_tile = love.graphics.newImage("assets/imagens/platform_tile.png")
+    assets.bonus_points = love.graphics.newImage("assets/imagens/bonus_points.png")
+    assets.bonus_life = love.graphics.newImage("assets/imagens/bonus_life.png")
 
-    engine.audio.loadSound("menu_music", "assets/audio/menu_loop.ogg", true, true)
-    engine.audio.loadSound("game_music", "assets/audio/game_loop.ogg", true, true)
-    engine.audio.loadSound("jump_sfx", "assets/audio/jump.wav", false, false)
-    engine.audio.loadSound("hit_sfx", "assets/audio/hit.wav", false, false)
-    engine.audio.loadSound("collect_sfx", "assets/audio/collect.wav", false, false)
+    -- Carregamento de Sons
+    sounds.jump = love.audio.newSource("assets/sounds/jump_sound.wav", "static")
+    sounds.shoot = love.audio.newSource("assets/sounds/shoot_sound.wav", "static")
+    sounds.bonus_collect = love.audio.newSource("assets/sounds/bonus_collect.wav", "static")
+    sounds.gameover = love.audio.newSource("assets/sounds/gameover.wav", "static") -- Novo som de game over
+	
+	
+	
+	sounds.player_hit = love.audio.newSource("assets/sounds/player_hit.wav", "static") -- Som quando o jogador é atingido
+    sounds.enemy_hit = love.audio.newSource("assets/sounds/enemy_hit.wav", "static")   -- Som quando um inimigo é atingido
+    -- As músicas agora são carregadas dinamicamente pelo loadLevel
 
-    -- =========================================================
-    -- DEFINIÇÃO DE PREFABS (Global para todos os estados)
-    -- =========================================================
-    engine.definePrefab("CollectibleGem", {
-        type = "collectible",
-        sprite = "gem_sprite",
-        width = 16,
-        height = 16,
-        isSolid = false,
-        isAffectedByGravity = false,
-        value = 10
-    })
+    -- Inicialização do Jogo
+    player = createPlayer()
+    initHUD()
 
-    -- =========================================================
-    -- DEFINIÇÃO DOS ESTADOS DO JOGO
-    -- =========================================================
+    -- Garante que o gerador de números aleatórios seja inicializado apenas uma vez
+    math.randomseed(os.time())
 
-    -- Estado do Menu Principal
-    engine.stateManager.addState("Menu", {
-        load = function()
-            print("Entrando no estado: Menu")
-            engine.audio.playMusic("menu_music")
-        end,
-        update = function(dt)
-            -- Lógica do menu
-        end,
-        draw = function()
-            love.graphics.setColor(0.2, 0.2, 0.8, 1)
-            love.graphics.rectangle("fill", 0, 0, engine.config.windowWidth, engine.config.windowHeight)
-            love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.setFont(love.graphics.newFont(30))
-            love.graphics.printf("MINI JOGO", 0, 200, engine.config.windowWidth, "center")
-            love.graphics.printf("Pressione ESPAÇO para Iniciar", 0, 300, engine.config.windowWidth, "center")
-        end,
-        keypressed = function(key)
-            if key == "space" then
-                engine.stateManager.changeState("GamePlay")
+    -- Inicia o primeiro nível
+    loadLevel(currentLevel)
+end
+
+-- main.lua (função love.update(dt))
+
+function love.update(dt)
+	
+    if gameState == "playing" then
+		
+        -- SEU CÓDIGO ATUAL DE ATUALIZAÇÃO DO JOGO VEM AQUI!
+        -- Tudo o que você já tinha dentro do love.update() antes,
+        -- que atualiza o jogador, inimigos, bônus, colisões, etc.
+
+        updatePlayer(dt)
+        updateEnemies(dt)
+        updateBonuses(dt)
+
+        -- Atualiza projéteis
+        for i = #projectiles, 1, -1 do
+            local proj = projectiles[i]
+            proj.x = proj.x + proj.dx * dt
+            if proj.x < -proj.width or proj.x > CONFIG.BASE_GAME_WIDTH + proj.width then
+                table.remove(projectiles, i)
             end
         end
-    })
 
-    -- Estado de Jogo Principal (GamePlay)
-    engine.stateManager.addState("GamePlay", {
-        load = function()
-            print("Entrando no estado: GamePlay")
-            -- O stateManager.changeState já limpa a engine.
-            -- A criação do mundo e entidades deve acontecer AQUI para cada vez que o jogo inicia.
-            engine.createPlayer(50, 100, 200, "player_sprite")
-            engine.createPlatform(0, 500, 30, "platform_tile")
-            engine.createPlatform(400, 400, 5, "platform_tile")
-            engine.createPlatform(800, 300, 10, "platform_tile")
-            engine.createPlatform(1200, 200, 7, "platform_tile")
-            engine.createStaticEnemy(600, 468, "enemy_sprite")
-            engine.createPatrollingEnemy(320, 368, 80, 320, 450, "enemy_sprite")
-            engine.createPatrollingEnemy(900, 268, 100, 850, 1050, "enemy_sprite")
-            engine.createPrefab("CollectibleGem", {x = 350, y = 350})
-            engine.createPrefab("CollectibleGem", {x = 850, y = 250})
+        -- Colisão projétil com inimigo (gato é imune)
+        for i = #projectiles, 1, -1 do
+            local proj = projectiles[i]
+            for j = #enemies, 1, -1 do
+                local enemy = enemies[j]
+                if not enemy.isCat and enemy.active and not enemy.hit and checkCollision(proj, enemy) then
+					
+                    table.remove(projectiles, i)
+                    enemy.hit = true
+                    enemy.dy = -150
+                    enemy.hitDirectionX = proj.dx * 1.5
+                    enemy.rotationSpeed = proj.dx > 0 and math.pi * 4 or -math.pi * 4
+                    score = score + 100
+					sounds.enemy_hit:play()
+					
+                    break
+                end
+            end
+        end
 
-            engine.camera.setLimits(0, 2000, 0, engine.config.windowHeight)
-            engine.camera.follow(engine.player)
-            engine.particles.newEmitter(100, 480, {
-                color = {0.5, 0.5, 0.5, 1},
-                startSize = 10, endSize = 30, lifeTime = 2, speed = 10, spread = 90,
-                minAngle = math.pi * 0.75, maxAngle = math.pi * 1.25, emissionRate = 5, gravityFactor = -0.1
-            })
-            engine.audio.playMusic("game_music")
-        end,
-        update = function(dt)
-            engine.update(dt) -- Chama a atualização da engine principal
+        -- Colisão jogador com inimigo
+        for i = #enemies, 1, -1 do
+            local enemy = enemies[i]
 
-            -- Lógica para coletar gemas (específico do GamePlay)
-            if engine.player then -- Verifica se o player existe na cena
-                for i = #engine.entities, 1, -1 do
-                    local e = engine.entities[i]
-                    if e.type == "collectible" then
-                        local collided, _ = engine.checkCollision(engine.player, e)
-                        if collided then
-                            print("Gema coletada!")
-                            engine.audio.playSound("collect_sfx")
-                            engine.removeEntity(e.id)
-                        end
+            if enemy.active and checkCollision(player, enemy) and not player.invincible then
+				sounds.player_hit:play()
+                if enemy.isCat and enemy.catState == "active" then
+                    gameState = "gameOver" -- Mudei de "gameover" para "gameOver" (padrão de case)
+                    sounds.gameover:play()
+                    finalScore = score
+                    return
+                elseif not enemy.isCat then
+                    lives = lives - 1
+                    playerHit()
+                    if lives <= 0 then
+                        gameState = "gameOver" -- Mudei de "gameover" para "gameOver"
+                        sounds.gameover:play()
+                        finalScore = score
+                        return
                     end
                 end
             end
-        end,
-        draw = function()
-            engine.draw() -- Chama o desenho da engine principal
-            love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.setFont(love.graphics.newFont(20))
-            love.graphics.print("Pressione ESC para o Menu", 10, 10)
-        end,
-        keypressed = function(key)
-            if engine.player and engine.player.canJump and key == "space" and engine.player.onGround then
-                engine.player.dy = -400
-                engine.player.onGround = false
-                engine.audio.playSound("jump_sfx")
-                engine.particles.newEmitter(engine.player.x + engine.player.width / 2, engine.player.y + engine.player.height, {
-                    color = {0.8, 0.8, 0.8, 1}, startSize = 5, endSize = 15, lifeTime = 0.3, speed = 30, spread = 180,
-                    minAngle = 0, maxAngle = math.pi, burst = 10, duration = 0.01, gravityFactor = 0.5
-                })
-            elseif key == "escape" then
-                engine.stateManager.changeState("Menu")
+        end
+
+        -- Colisão jogador com bônus
+        for i = #bonuses, 1, -1 do
+            local bonus = bonuses[i]
+            if bonus.active and checkCollision(player, bonus) then
+                if bonus.type == "points" then
+                    score = score + 200
+                elseif bonus.type == "life" then
+                    lives = lives + 1
+                    if lives > 5 then lives = 5 end
+                end
+                bonus.active = false
+                bonus.respawnTimer = CONFIG.BONUS_RESPAWN_TIME
+                sounds.bonus_collect:play()
             end
         end
-    })
 
-    -- Estado de Game Over
-    engine.stateManager.addState("GameOver", {
-        load = function()
-            print("Entrando no estado: Game Over")
-            engine.audio.stopMusic()
-        end,
-        update = function(dt)
-            -- Lógica de Game Over
-        end,
-        draw = function()
-            love.graphics.setColor(0.8, 0.2, 0.2, 1)
-            love.graphics.rectangle("fill", 0, 0, engine.config.windowWidth, engine.config.windowHeight)
-            love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.setFont(love.graphics.newFont(40))
-            love.graphics.printf("GAME OVER", 0, 250, engine.config.windowWidth, "center")
-            love.graphics.setFont(love.graphics.newFont(20))
-            love.graphics.printf("Pressione R para Reiniciar", 0, 350, engine.config.windowWidth, "center")
-        end,
-        keypressed = function(key)
-            if key == "r" then
-                engine.stateManager.changeState("GamePlay")
+        -- Verifica se todas as plataformas foram pintadas (final do nível)
+        local allPainted = true
+        for _, platTile in ipairs(platforms) do
+            if not platTile.painted then
+                allPainted = false
+                break
             end
         end
-    })
 
-    -- Inicia o jogo no estado do Menu
-    engine.stateManager.changeState("Menu")
-end
-
--- ===================== CALLBACKS DO LÖVE2D (Chamadas pelo sistema) =====================
-function love.update(dt)
-    if engine.stateManager.currentState and engine.stateManager.currentState.update then
-        engine.stateManager.currentState.update(dt)
+        if allPainted then
+            -- Verifica se ainda há mais níveis
+            if currentLevel < #levels then
+                currentLevel = currentLevel + 1
+                score = score + 500
+                loadLevel(currentLevel) -- Carrega o próximo nível
+            else
+                -- Todas as fases completas, jogador venceu!
+                gameState = "victory" -- Mudei de "gamewin" para "victory" (padrão de case)
+                finalScore = score
+                -- Opcional: tocar som de vitória
+                -- sounds.victory:play()
+            end
+        end
     end
-    love.audio.setVolume(engine.config.masterVolume) -- Garante que o volume global do Love2D esteja sempre de acordo
+    -- Se não estiver em "playing", nada dentro deste bloco será atualizado.
 end
+
+-- main.lua (função love.draw())
 
 function love.draw()
-    if engine.stateManager.currentState and engine.stateManager.currentState.draw then
-        engine.stateManager.currentState.draw()
+    local screenWidth = love.graphics.getWidth()
+    local screenHeight = love.graphics.getHeight()
+
+    if gameState == "menu" then
+        -- Desenha o fundo do menu
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(assets.menuBackground, 0, 0, 0,
+                           screenWidth / assets.menuBackground:getWidth(),
+                           screenHeight / assets.menuBackground:getHeight())
+
+        -- Desenha o título do jogo
+        love.graphics.setFont(assets.titleFont)
+        love.graphics.setColor(1, 1, 1, 1) -- Branco
+        love.graphics.printf("VIDADE AVENTURA", 0, screenHeight * 0.2, screenWidth, "center")
+
+        -- Desenha as opções do menu
+        love.graphics.setFont(assets.bigFont) -- Usando a fonte maior para "Pressione ENTER"
+        love.graphics.printf("Pressione ENTER para JOGAR", 0, screenHeight * 0.5, screenWidth, "center")
+        love.graphics.setFont(assets.menuFont) -- Usando a fonte menor para "Sair"
+        love.graphics.printf("Pressione ESC para Sair", 0, screenHeight * 0.7, screenWidth, "center")
+
+    elseif gameState == "playing" then
+        -- Desenha o fundo do nível (agora ele é carregado dinamicamente)
+        if fundoAtual then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(fundoAtual, 0, 0, 0,
+                               screenWidth / fundoAtual:getWidth(),
+                               screenHeight / fundoAtual:getHeight())
+        end
+
+        love.graphics.push()
+        love.graphics.scale(screenWidth / CONFIG.BASE_GAME_WIDTH, screenHeight / CONFIG.BASE_GAME_HEIGHT)
+
+        -- SEUS ELEMENTOS DE JOGO ATUAIS (PLATAFORMAS, BÔNUS, JOGADOR, INIMIGOS, PROJÉTEIS)
+        drawPlatforms()
+        drawBonuses()
+        drawPlayer()
+        drawEnemies()
+        -- Você tinha uma função drawProjectiles() aninhada, ela precisa ser global
+        -- ou você desenha os projéteis diretamente aqui:
+        love.graphics.setColor(1, 1, 1, 1)
+        for _, proj in ipairs(projectiles) do
+            love.graphics.draw(assets.projectile, proj.x, proj.y)
+        end
+
+        love.graphics.pop() -- Retorna às coordenadas normais da tela
+
+        -- Desenha o HUD (não escalado)
+        -- Ajustei para usar as novas fontes.
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.setFont(assets.menuFont) -- Usando menuFont para o HUD
+        love.graphics.print("SCORE: " .. score, 10, 10)
+        love.graphics.print("LIVES: " .. lives, 10, 30)
+        love.graphics.print("LEVEL: " .. currentLevel, 10, 50)
+
+    elseif gameState == "gameOver" then -- Mudei de "gameover" para "gameOver"
+        love.graphics.setColor(1, 1, 1, 1)
+        -- Se você tiver uma imagem de Game Over, desenhe-a:
+        if assets.gameOverScreen then
+            love.graphics.draw(assets.gameOverScreen, 0, 0, 0,
+                               screenWidth / assets.gameOverScreen:getWidth(),
+                               screenHeight / assets.gameOverScreen:getHeight())
+        end
+        love.graphics.setFont(assets.bigFont) -- Usando a fonte maior
+        love.graphics.setColor(1, 0, 0, 1) -- Vermelho
+        love.graphics.printf("GAME OVER", 0, screenHeight * 0.4, screenWidth, "center")
+        love.graphics.setFont(assets.menuFont)
+        love.graphics.setColor(1, 1, 1, 1) -- Branco
+        love.graphics.printf("PONTUACAO FINAL: " .. finalScore, 0, screenHeight * 0.5, screenWidth, "center")
+        love.graphics.printf("Pressione ENTER para Recomecar", 0, screenHeight * 0.7, screenWidth, "center")
+        love.graphics.printf("Pressione ESC para Voltar ao Menu", 0, screenHeight * 0.8, screenWidth, "center")
+
+    elseif gameState == "victory" then -- Mudei de "gamewin" para "victory"
+        love.graphics.setColor(1, 1, 1, 1)
+        -- Se você tiver uma imagem de Vitória, desenhe-a:
+        if assets.victoryScreen then
+            love.graphics.draw(assets.victoryScreen, 0, 0, 0,
+                               screenWidth / assets.victoryScreen:getWidth(),
+                               screenHeight / assets.victoryScreen:getHeight())
+        end
+        love.graphics.setFont(assets.bigFont)
+        love.graphics.setColor(0, 1, 0, 1) -- Verde
+        love.graphics.printf("PARABENS! VOCE VENCEU!", 0, screenHeight * 0.4, screenWidth, "center")
+        love.graphics.setFont(assets.menuFont)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.printf("PONTUACAO FINAL: " .. finalScore, 0, screenHeight * 0.5, screenWidth, "center")
+        love.graphics.printf("Pressione ENTER para Jogar Novamente", 0, screenHeight * 0.7, screenWidth, "center")
+        love.graphics.printf("Pressione ESC para Voltar ao Menu", 0, screenHeight * 0.8, screenWidth, "center")
     end
 end
+
+-- main.lua (função love.keypressed(key))
 
 function love.keypressed(key)
-    if engine.stateManager.currentState and engine.stateManager.currentState.keypressed then
-        engine.stateManager.currentState.keypressed(key)
+    if gameState == "menu" then
+        if key == "return" then -- Tecla Enter
+            gameState = "playing"
+            -- resetGame() -- Não precisa chamar aqui, já foi chamada no love.load().
+                           -- Se o jogador voltar ao menu e quiser jogar novamente, resetGame() será chamada nas telas finais.
+        elseif key == "escape" then
+            love.event.quit() -- Fecha o jogo
+        end
+    elseif gameState == "playing" then
+        -- SEU CÓDIGO ATUAL DE TECLADO PARA O JOGADOR VEM AQUI!
+        if key == "space" then
+            playerJump()
+        elseif key == "c" then
+            playerShoot()
+        end
+        -- Opcional: Pausar o jogo com ESC
+        -- elseif key == "escape" then
+        --     gameState = "paused" -- Exemplo de um estado de pausa
+    elseif gameState == "gameOver" or gameState == "victory" then -- Mudou para "gameOver" e "victory"
+        if key == "return" then -- Tecla Enter (ou 'R' como você tinha)
+            gameState = "playing"
+            resetGame() -- Reinicia o jogo completo
+        elseif key == "escape" then
+            gameState = "menu" -- Volta para o menu principal
+            resetGame() -- Reinicia o jogo para a próxima vez que começar do menu
+        end
     end
 end
-
-function love.mousepressed(x, y, button)
-    if engine.stateManager.currentState and engine.stateManager.currentState.mousepressed then
-        engine.stateManager.currentState.mousepressed(x, y, button)
-    end
-end
-
-return engine
